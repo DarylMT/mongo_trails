@@ -37,33 +37,14 @@ module PaperTrail
       # order. We use it to find the instance that performed the LAST save of each record, so
       # the version is attributed to it rather than to whichever instance happened to be
       # enrolled in the transaction last.
-      last_writers = last_writer_by_record(self.records)
-
       records.each_with_object({}) do |record, candidates|
         next unless record.trigger_transactional_callbacks?
-
         earlier_saved_candidate = candidates[record]
-
-        if earlier_saved_candidate && record.class.run_commit_callbacks_on_first_saved_instances_in_transaction
-          merge_accumulated_versions(from: record, to: earlier_saved_candidate)
-          next
-        end
-
+        merge_accumulated_versions(from: record) if @state.committed?
+        next if earlier_saved_candidate && record.class.run_commit_callbacks_on_first_saved_instances_in_transaction
         next if earlier_saved_candidate&.destroyed? && !record.destroyed?
-
         record._new_record_before_last_commit = true if earlier_saved_candidate&._new_record_before_last_commit
-
         candidates[record] = record
-      end.tap do |candidates|
-        # The kept instance runs after_commit and builds the version. When it is not itself the
-        # last writer, hand it the last writer's captured request context so the version is
-        # attributed to the writer it belongs to. The context shape is opaque here — the model
-        # owns capture/adopt (ModelConfig) so this stays agnostic of any app-specific state.
-        candidates.each_value do |kept|
-          next unless kept.class.run_commit_callbacks_on_first_saved_instances_in_transaction
-
-          adopt_last_writer_state(into: kept, from: last_writers[kept])
-        end
       end
     end
 
@@ -86,14 +67,19 @@ module PaperTrail
       into.send(:paper_trail_adopt_state, from.send(:paper_trail_captured_state))
     end
 
-    def merge_accumulated_versions(from:, to:)
-      return unless from.respond_to?(:paper_trail_accumulated_versions) && to.respond_to?(:paper_trail_accumulated_versions)
+    def merge_accumulated_versions(from:)
+      return unless from.respond_to?(:paper_trail_accumulated_versions)
 
       from_changes = from.paper_trail_accumulated_versions
       return if from_changes.blank?
 
-      existing = to.instance_variable_get(:@paper_trail_accumulated_versions) || {}
-      to.instance_variable_set(:@paper_trail_accumulated_versions, existing.merge(from_changes))
+      from.send(:paper_trail_within_writer_request) do
+        if from.previously_new_record?
+          from.paper_trail.record_create if from.paper_trail.save_version?
+        else
+          from.paper_trail.record_update(force: false, in_after_callback: true, is_touch: false) if from.paper_trail.save_version? # rubocop:disable Style/IfUnlessModifier,Layout/LineLength
+        end
+      end
     end
   end
 end

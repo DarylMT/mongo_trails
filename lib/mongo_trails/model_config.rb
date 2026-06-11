@@ -111,7 +111,6 @@ module PaperTrail
         private
 
         def paper_trail_on_record_create_in_transaction
-          paper_trail_within_writer_request { paper_trail.record_create if paper_trail.save_version? }
           paper_trail_clear_accumulated_versions
         end
       end
@@ -131,16 +130,6 @@ module PaperTrail
         end
 
         def paper_trail_on_record_update
-          paper_trail_within_writer_request do
-            if paper_trail.save_version?
-              paper_trail.record_update(
-                force: false,
-                in_after_callback: true,
-                is_touch: false
-              )
-            end
-          end
-
           paper_trail.clear_version_instance
           paper_trail_clear_accumulated_versions
         end

@@ -62,8 +62,10 @@ class TransactionHandlingTest < Minitest::Test
 
     ActiveRecord::Base.transaction do
       user.update!(name: 'Jackie Chan')
-      user.update!(title: 'Governor')
-      user.update!(name: 'John Doe')
+      ActiveRecord::Base.transaction do
+        user.update!(title: 'Governor')
+        user.update!(name: 'John Doe')
+      end
     end
 
     assert_equal 2, user.versions.count
